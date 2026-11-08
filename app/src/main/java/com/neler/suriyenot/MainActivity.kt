@@ -102,6 +102,13 @@ class MainActivity : AppCompatActivity() {
         filterChips = findViewById(R.id.filterChips)
         bubble = findViewById(R.id.bubble)
 
+        // Sağ alttaki butonlarda gölge olmasın
+        listOf<View>(findViewById(R.id.fabMe), findViewById(R.id.fabHere)).forEach {
+            it.stateListAnimator = null
+            it.elevation = 0f
+            it.translationZ = 0f
+        }
+
         map = findViewById(R.id.map)
         map.setTileSource(TileSourceFactory.MAPNIK)
         map.setMultiTouchControls(true)
@@ -240,7 +247,7 @@ class MainActivity : AppCompatActivity() {
         map.invalidate()
     }
 
-    /** "Buraya ekle" balonunu pinin başının yanına koyar (sağa sığmazsa sola). */
+    /** "Ekle" balonunu pinin sivri ucunun hemen altına koyar (altta yer yoksa pinin üstüne). */
     private fun positionBubble() {
         val p = selected ?: return
         if (bubble.visibility != View.VISIBLE) return
@@ -252,14 +259,17 @@ class MainActivity : AppCompatActivity() {
         val bw = bubble.measuredWidth
         val bh = bubble.measuredHeight
 
-        val headCenterY = pt.y - dpToPx(27) // pin başının ortası, sivri uçtan 27dp yukarıda
-        var x = pt.x + dpToPx(20)
-        if (x + bw > map.width - dpToPx(8)) x = pt.x - dpToPx(20) - bw
-        x = Math.max(dpToPx(8), x)
+        // Pinin sivri ucunun hemen ALTINDA, yatayda ortalı
+        val edge = dpToPx(8)
+        val maxX = Math.max(edge, map.width - bw - edge)
+        val x = (pt.x - bw / 2).coerceIn(edge, maxX)
 
-        val minY = topCard.bottom + dpToPx(8)
-        val maxY = Math.max(minY, map.height - bh - dpToPx(8))
-        val y = (headCenterY - bh / 2).coerceIn(minY, maxY)
+        var y = pt.y + dpToPx(10)
+        if (y + bh > map.height - edge) {
+            // Altta yer yoksa pinin üstüne koy (pin yüksekliği ~40dp)
+            y = pt.y - dpToPx(44) - bh - dpToPx(6)
+        }
+        y = Math.max(topCard.bottom + edge, y)
 
         bubble.x = x.toFloat()
         bubble.y = y.toFloat()

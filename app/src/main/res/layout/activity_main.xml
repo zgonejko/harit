@@ -76,7 +76,7 @@
                 android:id="@+id/btnBubbleAdd"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Buraya ekle"
+                android:text="Ekle"
                 app:icon="@drawable/ic_add" />
 
             <com.google.android.material.button.MaterialButton
@@ -104,15 +104,25 @@
             android:layout_height="wrap_content"
             android:layout_marginBottom="12dp"
             android:contentDescription="Konumum"
+            app:backgroundTint="?attr/colorPrimaryContainer"
+            app:elevation="0dp"
             app:fabSize="mini"
-            app:srcCompat="@drawable/ic_my_location" />
+            app:hoveredFocusedTranslationZ="0dp"
+            app:pressedTranslationZ="0dp"
+            app:srcCompat="@drawable/ic_my_location"
+            app:tint="?attr/colorOnPrimaryContainer" />
 
         <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
             android:id="@+id/fabHere"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:stateListAnimator="@null"
             android:text="Buradayım"
-            app:icon="@drawable/ic_place" />
+            android:textColor="?attr/colorOnPrimary"
+            app:backgroundTint="?attr/colorPrimary"
+            app:elevation="0dp"
+            app:icon="@drawable/ic_place"
+            app:iconTint="?attr/colorOnPrimary" />
     </LinearLayout>
 
 </FrameLayout>
