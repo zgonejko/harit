@@ -536,18 +536,46 @@ class MainActivity : AppCompatActivity() {
         tvTitle.text = if (existing == null) "Yeni yer" else "Yeri düzenle"
         tvCoords.text = String.format(Locale.US, "%.5f, %.5f", lat, lon)
 
-        var selectedCategory: String = existing?.category
-            ?: filter?.takeIf { it in store.categories }
-            ?: store.categories.first()
+        val tvCatError = v.findViewById<TextView>(R.id.tvCatError)
+
+        // Yeni yerde kategori otomatik seçilmez; kullanıcı kendisi seçmeli
+        var selectedCategory: String? = existing?.category
+
+        fun styleChoice(chip: Chip, color: Int, checked: Boolean) {
+            if (checked) {
+                chip.chipBackgroundColor = ColorStateList.valueOf(color)
+                chip.setTextColor(Color.WHITE)
+                chip.chipStrokeWidth = 0f
+                chip.isCheckedIconVisible = true
+                chip.checkedIconTint = ColorStateList.valueOf(Color.WHITE)
+                chip.alpha = 1f
+            } else {
+                // Seçilmeyenler sönük: açık gri zemin, silik yazı ve nokta
+                chip.chipBackgroundColor = ColorStateList.valueOf(Color.parseColor("#F1F4F3"))
+                chip.setTextColor(Color.parseColor("#9AA3A0"))
+                chip.chipStrokeWidth = dpToPx(1).toFloat()
+                chip.chipStrokeColor = ColorStateList.valueOf(Color.parseColor("#E1E6E4"))
+                chip.isCheckedIconVisible = false
+                chip.alpha = 0.7f
+            }
+        }
 
         fun addChip(cat: String, checked: Boolean) {
             val chip = layoutInflater.inflate(R.layout.chip_filter, group, false) as Chip
+            val color = categoryColor(cat)
             chip.id = View.generateViewId()
             chip.text = cat
-            styleDot(chip, categoryColor(cat))
+            styleDot(chip, color)
+            styleChoice(chip, color, checked)
             chip.isChecked = checked
             chip.setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked) selectedCategory = cat
+                styleChoice(chip, color, isChecked)
+                if (isChecked) {
+                    selectedCategory = cat
+                    tvCatError.visibility = View.GONE
+                } else if (selectedCategory == cat) {
+                    selectedCategory = null
+                }
             }
             group.addView(chip)
         }
@@ -590,15 +618,26 @@ class MainActivity : AppCompatActivity() {
 
         btnCancel.setOnClickListener { dialog.dismiss() }
         btnSave.setOnClickListener {
+            val category = selectedCategory
+            if (category == null) {
+                // Kategori seçilmeden kaydedilmez
+                tvCatError.visibility = View.VISIBLE
+                v.findViewById<View>(R.id.categoryChips).animate()
+                    .translationX(dpToPx(8).toFloat()).setDuration(60).withEndAction {
+                        v.findViewById<View>(R.id.categoryChips).animate()
+                            .translationX(0f).setDuration(60).start()
+                    }.start()
+                return@setOnClickListener
+            }
             val note = etNote.text?.toString()?.trim().orEmpty()
             if (existing == null) {
                 store.places.add(
-                    Place(System.currentTimeMillis(), lat, lon, selectedCategory, note, swVisited.isChecked)
+                    Place(System.currentTimeMillis(), lat, lon, category, note, swVisited.isChecked)
                 )
                 val sel = selected
                 if (sel != null && sel.latitude == lat && sel.longitude == lon) clearSelection()
             } else {
-                existing.category = selectedCategory
+                existing.category = category
                 existing.note = note
                 existing.visited = swVisited.isChecked
             }

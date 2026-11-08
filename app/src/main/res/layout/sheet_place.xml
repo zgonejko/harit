@@ -48,8 +48,17 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            app:selectionRequired="true"
+            app:selectionRequired="false"
             app:singleSelection="true" />
+
+        <TextView
+            android:id="@+id/tvCatError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Lütfen önce bir kategori seç"
+            android:textAppearance="?attr/textAppearanceBodyMedium"
+            android:textColor="?attr/colorError"
+            android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btnNewCat"
