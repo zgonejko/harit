@@ -38,9 +38,9 @@
                     android:layout_height="wrap_content"
                     android:paddingStart="14dp"
                     android:paddingEnd="6dp"
-                    app:selectionRequired="true"
+                    app:selectionRequired="false"
                     app:singleLine="true"
-                    app:singleSelection="true" />
+                    app:singleSelection="false" />
             </HorizontalScrollView>
 
             <com.google.android.material.button.MaterialButton

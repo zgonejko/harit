@@ -61,8 +61,8 @@ class MainActivity : AppCompatActivity() {
     private var selectionMarker: Marker? = null
     private var selected: GeoPoint? = null
 
-    /** null = tüm kategoriler */
-    private var filter: String? = null
+    /** Boşsa "Tümü"; doluysa seçilen kategoriler (birden fazla seçilebilir), seçilme sırasıyla */
+    private val activeFilters = LinkedHashSet<String>()
 
     private val palette = intArrayOf(
         Color.parseColor("#E53935"), Color.parseColor("#1E88E5"),
@@ -452,7 +452,7 @@ class MainActivity : AppCompatActivity() {
         markers.clear()
 
         store.places
-            .filter { filter == null || it.category == filter }
+            .filter { activeFilters.isEmpty() || it.category in activeFilters }
             .forEach { place ->
                 val marker = Marker(map)
                 marker.position = GeoPoint(place.lat, place.lon)
@@ -462,7 +462,7 @@ class MainActivity : AppCompatActivity() {
                 // "Tümü" seçiliyken notun altında kategori adı da görünür; tek kategori seçiliyken sadece not.
                 val hasNote = place.note.isNotBlank()
                 val mainText = if (hasNote) place.note else place.category
-                val subText = if (hasNote && filter == null) place.category else null
+                val subText = if (hasNote && activeFilters.size != 1) place.category else null
                 val (bmp, anchorU, anchorV) =
                     labeledMarker(categoryColor(place.category), ring, place.visited, mainText, subText)
                 marker.icon = BitmapDrawable(resources, bmp)
@@ -780,33 +780,63 @@ class MainActivity : AppCompatActivity() {
     // ---------- Üstteki kategori filtresi ----------
 
     private fun buildFilterChips() {
-        filterChips.setOnCheckedStateChangeListener(null)
         filterChips.removeAllViews()
+        activeFilters.retainAll(store.categories.toSet())
 
-        if (filter != null && filter !in store.categories) filter = null
-
-        val ids = mutableMapOf<Int, String?>()
-        fun add(label: String, value: String?, color: Int?) {
-            val chip = layoutInflater.inflate(R.layout.chip_filter, filterChips, false) as Chip
-            chip.id = View.generateViewId()
-            chip.text = label
-            if (color != null) styleDot(chip, color)
-            ids[chip.id] = value
-            filterChips.addView(chip)
-            if (value == filter) chip.isChecked = true
-        }
-
-        add("Tümü", null, null)
-        store.categories.forEach { add(it, it, categoryColor(it)) }
-
-        filterChips.setOnCheckedStateChangeListener { _, checkedIds ->
-            val id = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
-            val newFilter = ids[id]
-            if (newFilter != filter) {
-                filter = newFilter
-                refreshMarkers()
+        fun styleFilter(chip: Chip, color: Int, on: Boolean) {
+            if (on) {
+                chip.chipBackgroundColor = ColorStateList.valueOf(color)
+                chip.setTextColor(Color.WHITE)
+                chip.chipStrokeWidth = 0f
+                chip.alpha = 1f
+            } else {
+                chip.chipBackgroundColor = ColorStateList.valueOf(Color.parseColor("#F1F4F3"))
+                chip.setTextColor(Color.parseColor("#9AA3A0"))
+                chip.chipStrokeWidth = dpToPx(1).toFloat()
+                chip.chipStrokeColor = ColorStateList.valueOf(Color.parseColor("#E1E6E4"))
+                chip.alpha = 0.7f
             }
         }
+
+        fun add(label: String, cat: String?, color: Int, on: Boolean, onClick: () -> Unit) {
+            val chip = layoutInflater.inflate(R.layout.chip_filter, filterChips, false) as Chip
+            chip.text = label
+            chip.isCheckable = false
+            chip.isCheckedIconVisible = false
+            if (cat != null) {
+                styleDot(chip, color)
+                chip.isCheckedIconVisible = false
+            }
+            styleFilter(chip, color, on)
+            chip.setOnClickListener { onClick() }
+            filterChips.addView(chip)
+        }
+
+        val allColor = Color.parseColor("#00695C")
+
+        // 1) "Tümü" hep en solda; hiçbir kategori seçili değilse seçili görünür
+        add("Tümü", null, allColor, activeFilters.isEmpty()) {
+            activeFilters.clear()
+            buildFilterChips()
+        }
+
+        // 2) Seçilen kategoriler "Tümü"nün hemen sağında (seçilme sırasıyla)
+        activeFilters.toList().forEach { cat ->
+            add(cat, cat, categoryColor(cat), true) {
+                activeFilters.remove(cat) // tekrar tıklayınca eski yerine döner; hiç kalmazsa Tümü seçilir
+                buildFilterChips()
+            }
+        }
+
+        // 3) Seçilmeyenler sönük, asıl sıralarıyla
+        store.categories.filter { it !in activeFilters }.forEach { cat ->
+            add(cat, cat, categoryColor(cat), false) {
+                activeFilters.add(cat)
+                buildFilterChips()
+            }
+        }
+
+        filterChips.parent?.let { (it as? android.widget.HorizontalScrollView)?.smoothScrollTo(0, 0) }
         refreshMarkers()
     }
 
