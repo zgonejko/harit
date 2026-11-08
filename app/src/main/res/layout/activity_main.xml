@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -8,58 +9,110 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <LinearLayout
+    <!-- Üstte kategori filtresi -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/topCard"
+        style="@style/Widget.Material3.CardView.Elevated"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
-        android:background="#E6FFFFFF"
-        android:orientation="horizontal"
-        android:padding="6dp">
+        android:layout_margin="12dp"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="6dp">
 
-        <TextView
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <HorizontalScrollView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:scrollbars="none">
+
+                <com.google.android.material.chip.ChipGroup
+                    android:id="@+id/filterChips"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="14dp"
+                    android:paddingEnd="6dp"
+                    app:selectionRequired="true"
+                    app:singleLine="true"
+                    app:singleSelection="true" />
+            </HorizontalScrollView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCategories"
+                style="?attr/materialIconButtonStyle"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="4dp"
+                android:contentDescription="Kategorileri düzenle"
+                app:icon="@drawable/ic_label" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Haritada dokunulan noktanın yanında çıkan "Buraya ekle" balonu -->
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/bubble"
+        style="@style/Widget.Material3.CardView.Elevated"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:visibility="gone"
+        app:cardCornerRadius="24dp"
+        app:cardElevation="8dp">
+
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:paddingStart="6dp"
-            android:paddingEnd="6dp"
-            android:text="Göster:"
-            android:textColor="#222222" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:padding="4dp">
 
-        <Spinner
-            android:id="@+id/spFilter"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1" />
-    </LinearLayout>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnBubbleAdd"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Buraya ekle"
+                app:icon="@drawable/ic_add" />
 
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnBubbleClose"
+                style="?attr/materialIconButtonStyle"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:contentDescription="Seçimi kaldır"
+                app:icon="@drawable/ic_close" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Sağ altta butonlar -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:background="#E6FFFFFF"
-        android:orientation="horizontal"
-        android:padding="6dp">
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:gravity="end"
+        android:orientation="vertical">
 
-        <Button
-            android:id="@+id/btnMe"
-            android:layout_width="0dp"
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            android:id="@+id/fabMe"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Konumum" />
+            android:layout_marginBottom="12dp"
+            android:contentDescription="Konumum"
+            app:fabSize="mini"
+            app:srcCompat="@drawable/ic_my_location" />
 
-        <Button
-            android:id="@+id/btnMarkHere"
-            android:layout_width="0dp"
+        <com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+            android:id="@+id/fabHere"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_weight="1.3"
-            android:text="Buradayım, işaretle" />
-
-        <Button
-            android:id="@+id/btnCategories"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Kategoriler" />
+            android:text="Buradayım"
+            app:icon="@drawable/ic_place" />
     </LinearLayout>
 
 </FrameLayout>

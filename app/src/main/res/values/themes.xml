@@ -1,4 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.SuriyeNotlari" parent="Theme.AppCompat.Light.NoActionBar" />
+    <style name="Theme.SuriyeNotlari" parent="Theme.Material3.Light.NoActionBar">
+        <item name="colorPrimary">#00695C</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorPrimaryContainer">#B2DFDB</item>
+        <item name="colorOnPrimaryContainer">#00201C</item>
+        <item name="colorSecondaryContainer">#CCE8E3</item>
+        <item name="colorOnSecondaryContainer">#05201D</item>
+        <item name="colorSurface">#FBFDFC</item>
+        <item name="colorOnSurface">#191C1B</item>
+        <item name="colorSurfaceVariant">#DBE5E2</item>
+        <item name="colorOnSurfaceVariant">#3F4947</item>
+        <item name="colorSurfaceContainerLowest">#FFFFFF</item>
+        <item name="colorSurfaceContainerLow">#F4F7F6</item>
+        <item name="colorSurfaceContainer">#EEF2F1</item>
+        <item name="colorSurfaceContainerHigh">#E8EDEC</item>
+        <item name="colorSurfaceContainerHighest">#E2E8E6</item>
+        <item name="colorOutline">#6F7977</item>
+        <item name="colorOutlineVariant">#BEC9C6</item>
+        <item name="android:statusBarColor">#FFFFFFFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>

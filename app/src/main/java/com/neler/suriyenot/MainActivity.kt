@@ -1,46 +1,65 @@
 package com.neler.suriyenot
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Point
 import android.graphics.Typeface
-import android.util.TypedValue
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.util.TypedValue
 import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
-import android.widget.Button
-import android.widget.CheckBox
-import android.widget.EditText
-import android.widget.Spinner
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.google.android.material.bottomsheet.BottomSheetBehavior
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.TextInputEditText
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var map: MapView
     private lateinit var store: Store
-    private lateinit var spFilter: Spinner
+    private lateinit var topCard: MaterialCardView
+    private lateinit var filterChips: ChipGroup
+    private lateinit var bubble: View
     private var locationOverlay: MyLocationNewOverlay? = null
     private val markers = mutableListOf<Marker>()
+
+    /** Haritada dokunulan, henüz kaydedilmemiş nokta (turuncu pin + "Buraya ekle" balonu) */
+    private var selectionMarker: Marker? = null
+    private var selected: GeoPoint? = null
 
     /** null = tüm kategoriler */
     private var filter: String? = null
@@ -79,16 +98,21 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         store = Store(this)
 
+        topCard = findViewById(R.id.topCard)
+        filterChips = findViewById(R.id.filterChips)
+        bubble = findViewById(R.id.bubble)
+
         map = findViewById(R.id.map)
         map.setTileSource(TileSourceFactory.MAPNIK)
         map.setMultiTouchControls(true)
+        map.zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
         map.controller.setZoom(6.5)
         map.controller.setCenter(GeoPoint(35.0, 38.5)) // Suriye
 
-        // Haritada bir yere dokununca yeni yer ekleme formu açılır
+        // Haritada bir yere dokununca orada pin belirir, yanında "Buraya ekle" balonu çıkar
         val tapReceiver = object : MapEventsReceiver {
             override fun singleTapConfirmedHelper(p: GeoPoint): Boolean {
-                showPlaceForm(null, p.latitude, p.longitude, false)
+                selectPoint(p)
                 return true
             }
 
@@ -96,21 +120,25 @@ class MainActivity : AppCompatActivity() {
         }
         map.overlays.add(MapEventsOverlay(tapReceiver))
 
-        spFilter = findViewById(R.id.spFilter)
-        spFilter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val newFilter = if (position == 0) null else store.categories.getOrNull(position - 1)
-                if (newFilter != filter) {
-                    filter = newFilter
-                    refreshMarkers()
-                }
+        // Harita kayarken/yakınlaşırken balon pinin yanında kalsın
+        map.addMapListener(object : MapListener {
+            override fun onScroll(event: ScrollEvent?): Boolean {
+                positionBubble()
+                return false
             }
 
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        refreshFilterSpinner()
+            override fun onZoom(event: ZoomEvent?): Boolean {
+                positionBubble()
+                return false
+            }
+        })
 
-        findViewById<Button>(R.id.btnMe).setOnClickListener {
+        findViewById<View>(R.id.btnBubbleAdd).setOnClickListener {
+            selected?.let { showPlaceSheet(null, it.latitude, it.longitude, false) }
+        }
+        findViewById<View>(R.id.btnBubbleClose).setOnClickListener { clearSelection() }
+
+        findViewById<View>(R.id.fabMe).setOnClickListener {
             val me = locationOverlay?.myLocation
             if (me == null) {
                 Toast.makeText(this, "GPS konumu henüz alınamadı. GPS açık mı?", Toast.LENGTH_SHORT).show()
@@ -120,17 +148,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.btnMarkHere).setOnClickListener {
+        findViewById<View>(R.id.fabHere).setOnClickListener {
             val me = locationOverlay?.myLocation
             if (me == null) {
                 Toast.makeText(this, "GPS konumu henüz alınamadı. GPS açık mı?", Toast.LENGTH_SHORT).show()
             } else {
-                showPlaceForm(null, me.latitude, me.longitude, true)
+                showPlaceSheet(null, me.latitude, me.longitude, true)
             }
         }
 
-        findViewById<Button>(R.id.btnCategories).setOnClickListener { showCategories() }
+        findViewById<View>(R.id.btnCategories).setOnClickListener { showCategoriesSheet() }
 
+        // Geri tuşu önce seçimi kaldırır
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (selected != null) {
+                    clearSelection()
+                } else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+
+        buildFilterChips()
         requestLocation()
         refreshMarkers()
     }
@@ -168,6 +209,71 @@ class MainActivity : AppCompatActivity() {
         map.overlays.add(overlay)
         locationOverlay = overlay
         map.invalidate()
+    }
+
+    // ---------- Seçim (dokunulan nokta) ----------
+
+    private fun selectPoint(p: GeoPoint) {
+        selected = p
+        selectionMarker?.let { map.overlays.remove(it) }
+
+        // Turuncu pin, yazısız. Sivri uç tam dokunulan koordinattadır.
+        val (bmp, anchorU, anchorV) = labeledMarker(Color.parseColor("#FF6D00"), Color.WHITE, false, "", null)
+        val marker = Marker(map)
+        marker.position = p
+        marker.icon = BitmapDrawable(resources, bmp)
+        marker.setAnchor(anchorU, anchorV)
+        marker.setOnMarkerClickListener { _, _ -> true }
+        map.overlays.add(marker)
+        selectionMarker = marker
+
+        bubble.visibility = View.VISIBLE
+        positionBubble()
+        map.invalidate()
+    }
+
+    private fun clearSelection() {
+        selectionMarker?.let { map.overlays.remove(it) }
+        selectionMarker = null
+        selected = null
+        bubble.visibility = View.GONE
+        map.invalidate()
+    }
+
+    /** "Buraya ekle" balonunu pinin başının yanına koyar (sağa sığmazsa sola). */
+    private fun positionBubble() {
+        val p = selected ?: return
+        if (bubble.visibility != View.VISIBLE) return
+
+        val pt = Point()
+        map.projection.toPixels(p, pt)
+
+        bubble.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val bw = bubble.measuredWidth
+        val bh = bubble.measuredHeight
+
+        val headCenterY = pt.y - dpToPx(27) // pin başının ortası, sivri uçtan 27dp yukarıda
+        var x = pt.x + dpToPx(20)
+        if (x + bw > map.width - dpToPx(8)) x = pt.x - dpToPx(20) - bw
+        x = Math.max(dpToPx(8), x)
+
+        val minY = topCard.bottom + dpToPx(8)
+        val maxY = Math.max(minY, map.height - bh - dpToPx(8))
+        val y = (headCenterY - bh / 2).coerceIn(minY, maxY)
+
+        bubble.x = x.toFloat()
+        bubble.y = y.toFloat()
+    }
+
+    /** Alt panel açılacağı zaman nokta panelin altında kalmasın diye haritayı yukarı kaydırır. */
+    private fun ensureVisibleAbove(p: GeoPoint) {
+        val pt = Point()
+        map.projection.toPixels(p, pt)
+        if (pt.y > map.height * 0.30f) {
+            val desiredY = (map.height * 0.16f).toInt()
+            val target = map.projection.fromPixels(map.width / 2, map.height / 2 + (pt.y - desiredY))
+            map.controller.animateTo(target)
+        }
     }
 
     // ---------- Marker çizimi ----------
@@ -236,7 +342,7 @@ class MainActivity : AppCompatActivity() {
         val sfm = subPaint.fontMetrics
         val textH = fm.descent - fm.ascent
         val subH = sfm.descent - sfm.ascent
-        val blockH = if (sub != null) textH + subH else textH
+        val blockH = if (text.isEmpty()) 0f else if (sub != null) textH + subH else textH
 
         var textWidthF = textPaint.measureText(text)
         if (sub != null) textWidthF = Math.max(textWidthF, subPaint.measureText(sub))
@@ -254,7 +360,8 @@ class MainActivity : AppCompatActivity() {
         val tipY = shift + m + pinH
         val textBottom = shift + headCy + blockH / 2f + pad / 2f
 
-        val width = Math.ceil((pinW + gap + textWidth + pad).toDouble()).toInt()
+        val labelW = if (text.isEmpty()) 0 else gap + textWidth + pad
+        val width = Math.ceil((pinW + labelW).toDouble()).toInt()
         val height = Math.ceil(Math.max(tipY + m, textBottom).toDouble()).toInt()
 
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -308,15 +415,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Yazı: pin başının sağında, baş ortasına hizalı
-        val x = pinW + gap
-        val top = cy - blockH / 2f
-        val baseline1 = top - fm.ascent
-        canvas.drawText(text, x, baseline1, haloPaint)
-        canvas.drawText(text, x, baseline1, textPaint)
-        if (sub != null) {
-            val baseline2 = top + textH - sfm.ascent
-            canvas.drawText(sub, x, baseline2, subHaloPaint)
-            canvas.drawText(sub, x, baseline2, subPaint)
+        if (text.isNotEmpty()) {
+            val x = pinW + gap
+            val top = cy - blockH / 2f
+            val baseline1 = top - fm.ascent
+            canvas.drawText(text, x, baseline1, haloPaint)
+            canvas.drawText(text, x, baseline1, textPaint)
+            if (sub != null) {
+                val baseline2 = top + textH - sfm.ascent
+                canvas.drawText(sub, x, baseline2, subHaloPaint)
+                canvas.drawText(sub, x, baseline2, subPaint)
+            }
         }
 
         // Çapa = pinin sivri ucu
@@ -324,9 +433,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun categoryColor(category: String): Int {
-        val idx = store.categories.indexOf(category)
-        val i = if (idx >= 0) idx else Math.abs(category.hashCode())
-        return palette[i % palette.size]
+        val idx = store.colorIdx[category] ?: Math.abs(category.hashCode())
+        return palette[idx % palette.size]
     }
 
     private fun refreshMarkers() {
@@ -341,8 +449,6 @@ class MainActivity : AppCompatActivity() {
                 // Pin rengi = kategori; yeşil kenar + beyaz tik = gidildi, beyaz kenar = henüz gidilmedi.
                 // Pinin sivri ucu tam işaretlenen konumdadır.
                 val ring = if (place.visited) Color.parseColor("#2E7D32") else Color.WHITE
-                // Noktanın yanında açıklama yazısı görünür (not yoksa kategori adı).
-                // İşaretçi ikonları ekranda sabit boyutta kalır, harita yakınlaşsa da yazı büyümez/küçülmez.
                 // "Tümü" seçiliyken notun altında kategori adı da görünür; tek kategori seçiliyken sadece not.
                 val hasNote = place.note.isNotBlank()
                 val mainText = if (hasNote) place.note else place.category
@@ -351,154 +457,308 @@ class MainActivity : AppCompatActivity() {
                     labeledMarker(categoryColor(place.category), ring, place.visited, mainText, subText)
                 marker.icon = BitmapDrawable(resources, bmp)
                 marker.setAnchor(anchorU, anchorV)
-                marker.title = place.category
-                marker.snippet = place.note
                 marker.setOnMarkerClickListener { _, _ ->
-                    showPlaceDetails(place)
+                    showDetailsSheet(place)
                     true
                 }
                 markers.add(marker)
                 map.overlays.add(marker)
             }
+
+        // Seçim pini her zaman en üstte kalsın
+        selectionMarker?.let {
+            map.overlays.remove(it)
+            map.overlays.add(it)
+        }
         map.invalidate()
     }
 
-    // ---------- Yer ekleme / düzenleme ----------
+    // ---------- Alt paneller (haritayı kapatmayan) ----------
 
-    private fun showPlaceForm(existing: Place?, lat: Double, lon: Double, visitedDefault: Boolean) {
+    private fun newSheet(): BottomSheetDialog {
+        val d = BottomSheetDialog(this)
+        d.window?.setDimAmount(0.08f)
+        d.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        return d
+    }
+
+    private fun showSheet(d: BottomSheetDialog, content: View) {
+        d.setContentView(content)
+        d.behavior.skipCollapsed = true
+        d.behavior.state = BottomSheetBehavior.STATE_EXPANDED
+        d.show()
+    }
+
+    private fun styleDot(chip: Chip, color: Int) {
+        val dot = GradientDrawable()
+        dot.shape = GradientDrawable.OVAL
+        dot.setColor(color)
+        dot.setSize(dpToPx(12), dpToPx(12))
+        chip.chipIcon = dot
+        chip.isChipIconVisible = true
+        chip.chipIconSize = dpToPx(12).toFloat()
+        chip.chipIconTint = null
+        chip.isCheckedIconVisible = false
+    }
+
+    private fun showPlaceSheet(existing: Place?, lat: Double, lon: Double, visitedDefault: Boolean) {
         if (store.categories.isEmpty()) {
-            Toast.makeText(this, "Önce en az bir kategori ekle (ör. Elektronik, Otomobil).", Toast.LENGTH_LONG).show()
-            showCategories()
+            Toast.makeText(this, "Önce bir kategori ekle", Toast.LENGTH_SHORT).show()
+            showCategoriesSheet()
             return
         }
+        ensureVisibleAbove(GeoPoint(lat, lon))
 
-        val v = layoutInflater.inflate(R.layout.dialog_place, null)
+        val dialog = newSheet()
+        val v = layoutInflater.inflate(R.layout.sheet_place, null)
+        val tvTitle = v.findViewById<TextView>(R.id.tvTitle)
         val tvCoords = v.findViewById<TextView>(R.id.tvCoords)
-        val spCategory = v.findViewById<Spinner>(R.id.spCategory)
-        val etNote = v.findViewById<EditText>(R.id.etNote)
-        val cbVisited = v.findViewById<CheckBox>(R.id.cbVisited)
+        val group = v.findViewById<ChipGroup>(R.id.categoryChips)
+        val etNote = v.findViewById<TextInputEditText>(R.id.etNote)
+        val swVisited = v.findViewById<MaterialSwitch>(R.id.swVisited)
+        val btnNewCat = v.findViewById<MaterialButton>(R.id.btnNewCat)
+        val newCatRow = v.findViewById<View>(R.id.newCatRow)
+        val etNewCat = v.findViewById<TextInputEditText>(R.id.etNewCat)
+        val btnAddCat = v.findViewById<MaterialButton>(R.id.btnAddCat)
+        val btnCancel = v.findViewById<MaterialButton>(R.id.btnCancel)
+        val btnSave = v.findViewById<MaterialButton>(R.id.btnSave)
 
-        tvCoords.text = String.format("%.5f, %.5f", lat, lon)
+        tvTitle.text = if (existing == null) "Yeni yer" else "Yeri düzenle"
+        tvCoords.text = String.format(Locale.US, "%.5f, %.5f", lat, lon)
+
+        var selectedCategory: String = existing?.category
+            ?: filter?.takeIf { it in store.categories }
+            ?: store.categories.first()
+
+        fun addChip(cat: String, checked: Boolean) {
+            val chip = layoutInflater.inflate(R.layout.chip_filter, group, false) as Chip
+            chip.id = View.generateViewId()
+            chip.text = cat
+            styleDot(chip, categoryColor(cat))
+            chip.isChecked = checked
+            chip.setOnCheckedChangeListener { _, isChecked ->
+                if (isChecked) selectedCategory = cat
+            }
+            group.addView(chip)
+        }
 
         val options = store.categories.toMutableList()
         if (existing != null && existing.category !in options) options.add(existing.category)
-        spCategory.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, options)
+        options.forEach { addChip(it, it == selectedCategory) }
 
-        if (existing != null) {
-            spCategory.setSelection(options.indexOf(existing.category).coerceAtLeast(0))
-            etNote.setText(existing.note)
+        // Formdan çıkmadan yeni kategori ekleme
+        btnNewCat.setOnClickListener {
+            newCatRow.visibility = View.VISIBLE
+            etNewCat.requestFocus()
         }
-        cbVisited.isChecked = existing?.visited ?: visitedDefault
 
-        AlertDialog.Builder(this)
-            .setTitle(if (existing == null) "Yeni yer" else "Yeri düzenle")
-            .setView(v)
-            .setPositiveButton("Kaydet") { _, _ ->
-                val category = spCategory.selectedItem as String
-                val note = etNote.text.toString().trim()
-                if (existing == null) {
-                    store.places.add(
-                        Place(System.currentTimeMillis(), lat, lon, category, note, cbVisited.isChecked)
-                    )
-                } else {
-                    existing.category = category
-                    existing.note = note
-                    existing.visited = cbVisited.isChecked
+        fun commitNewCategory() {
+            val name = etNewCat.text?.toString()?.trim().orEmpty()
+            if (name.isEmpty()) return
+            if (store.addCategory(name)) {
+                buildFilterChips()
+                selectedCategory = name
+                addChip(name, true)
+                etNewCat.setText("")
+                newCatRow.visibility = View.GONE
+            } else {
+                Toast.makeText(this, "Bu kategori zaten var", Toast.LENGTH_SHORT).show()
+            }
+        }
+        btnAddCat.setOnClickListener { commitNewCategory() }
+        etNewCat.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                commitNewCategory()
+                true
+            } else {
+                false
+            }
+        }
+
+        if (existing != null) etNote.setText(existing.note)
+        swVisited.isChecked = existing?.visited ?: visitedDefault
+
+        btnCancel.setOnClickListener { dialog.dismiss() }
+        btnSave.setOnClickListener {
+            val note = etNote.text?.toString()?.trim().orEmpty()
+            if (existing == null) {
+                store.places.add(
+                    Place(System.currentTimeMillis(), lat, lon, selectedCategory, note, swVisited.isChecked)
+                )
+                val sel = selected
+                if (sel != null && sel.latitude == lat && sel.longitude == lon) clearSelection()
+            } else {
+                existing.category = selectedCategory
+                existing.note = note
+                existing.visited = swVisited.isChecked
+            }
+            store.savePlaces()
+            refreshMarkers()
+            dialog.dismiss()
+        }
+
+        showSheet(dialog, v)
+    }
+
+    private fun showDetailsSheet(place: Place) {
+        ensureVisibleAbove(GeoPoint(place.lat, place.lon))
+
+        val dialog = newSheet()
+        val v = layoutInflater.inflate(R.layout.sheet_details, null)
+        val tvCategory = v.findViewById<TextView>(R.id.tvCategory)
+        val tvStatus = v.findViewById<TextView>(R.id.tvStatus)
+        val tvNote = v.findViewById<TextView>(R.id.tvNote)
+        val tvCoords = v.findViewById<TextView>(R.id.tvCoords)
+        val btnDelete = v.findViewById<MaterialButton>(R.id.btnDelete)
+        val btnEdit = v.findViewById<MaterialButton>(R.id.btnEdit)
+        val btnToggle = v.findViewById<MaterialButton>(R.id.btnToggle)
+
+        val pill = GradientDrawable()
+        pill.cornerRadius = dpToPx(16).toFloat()
+        pill.setColor(categoryColor(place.category))
+        tvCategory.background = pill
+        tvCategory.text = place.category
+
+        val green = Color.parseColor("#2E7D32")
+        if (place.visited) {
+            tvStatus.text = "Gidildi"
+            tvStatus.setTextColor(green)
+            tvStatus.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_check, 0, 0, 0)
+            tvStatus.compoundDrawableTintList = ColorStateList.valueOf(green)
+        } else {
+            tvStatus.text = "Henüz gidilmedi"
+            tvStatus.setTextColor(Color.parseColor("#6F7977"))
+        }
+
+        if (place.note.isBlank()) {
+            tvNote.text = "Açıklama yok"
+            tvNote.setTextColor(Color.parseColor("#6F7977"))
+        } else {
+            tvNote.text = place.note
+        }
+        tvCoords.text = String.format(Locale.US, "%.5f, %.5f", place.lat, place.lon)
+
+        btnToggle.text = if (place.visited) "Gidilmedi yap" else "Gidildi yap"
+        btnToggle.setOnClickListener {
+            place.visited = !place.visited
+            store.savePlaces()
+            refreshMarkers()
+            dialog.dismiss()
+        }
+
+        btnEdit.setOnClickListener {
+            dialog.dismiss()
+            showPlaceSheet(place, place.lat, place.lon, place.visited)
+        }
+
+        // Silince onay sorulmaz, "Geri al" çıkar
+        btnDelete.setOnClickListener {
+            dialog.dismiss()
+            val idx = store.places.indexOf(place)
+            store.places.remove(place)
+            store.savePlaces()
+            refreshMarkers()
+            Snackbar.make(map, "Yer silindi", Snackbar.LENGTH_LONG)
+                .setAnchorView(R.id.fabHere)
+                .setAction("GERİ AL") {
+                    store.places.add(idx.coerceIn(0, store.places.size), place)
+                    store.savePlaces()
+                    refreshMarkers()
                 }
-                store.savePlaces()
+                .show()
+        }
+
+        showSheet(dialog, v)
+    }
+
+    private fun showCategoriesSheet() {
+        val dialog = newSheet()
+        val v = layoutInflater.inflate(R.layout.sheet_categories, null)
+        val chips = v.findViewById<ChipGroup>(R.id.catChips)
+        val tvEmpty = v.findViewById<TextView>(R.id.tvEmpty)
+        val etNew = v.findViewById<TextInputEditText>(R.id.etNewCat)
+        val btnAdd = v.findViewById<MaterialButton>(R.id.btnAddCat)
+        val btnDone = v.findViewById<MaterialButton>(R.id.btnDone)
+
+        fun rebuild() {
+            chips.removeAllViews()
+            tvEmpty.visibility = if (store.categories.isEmpty()) View.VISIBLE else View.GONE
+            store.categories.toList().forEach { cat ->
+                val chip = layoutInflater.inflate(R.layout.chip_input, chips, false) as Chip
+                chip.text = cat
+                chip.chipBackgroundColor = ColorStateList.valueOf(categoryColor(cat))
+                chip.chipStrokeWidth = 0f
+                chip.setTextColor(Color.WHITE)
+                chip.isCloseIconVisible = true
+                chip.closeIconTint = ColorStateList.valueOf(Color.WHITE)
+                chip.setOnCloseIconClickListener {
+                    store.removeCategory(cat)
+                    buildFilterChips()
+                    refreshMarkers()
+                    rebuild()
+                }
+                chips.addView(chip)
+            }
+        }
+
+        fun addNew() {
+            val name = etNew.text?.toString()?.trim().orEmpty()
+            if (name.isEmpty()) return
+            if (store.addCategory(name)) {
+                etNew.setText("")
+                buildFilterChips()
+                rebuild()
+            } else {
+                Toast.makeText(this, "Bu kategori zaten var", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        btnAdd.setOnClickListener { addNew() }
+        etNew.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_DONE) {
+                addNew()
+                true
+            } else {
+                false
+            }
+        }
+        btnDone.setOnClickListener { dialog.dismiss() }
+
+        rebuild()
+        showSheet(dialog, v)
+    }
+
+    // ---------- Üstteki kategori filtresi ----------
+
+    private fun buildFilterChips() {
+        filterChips.setOnCheckedStateChangeListener(null)
+        filterChips.removeAllViews()
+
+        if (filter != null && filter !in store.categories) filter = null
+
+        val ids = mutableMapOf<Int, String?>()
+        fun add(label: String, value: String?, color: Int?) {
+            val chip = layoutInflater.inflate(R.layout.chip_filter, filterChips, false) as Chip
+            chip.id = View.generateViewId()
+            chip.text = label
+            if (color != null) styleDot(chip, color)
+            ids[chip.id] = value
+            filterChips.addView(chip)
+            if (value == filter) chip.isChecked = true
+        }
+
+        add("Tümü", null, null)
+        store.categories.forEach { add(it, it, categoryColor(it)) }
+
+        filterChips.setOnCheckedStateChangeListener { _, checkedIds ->
+            val id = checkedIds.firstOrNull() ?: return@setOnCheckedStateChangeListener
+            val newFilter = ids[id]
+            if (newFilter != filter) {
+                filter = newFilter
                 refreshMarkers()
             }
-            .setNegativeButton("İptal", null)
-            .show()
-    }
-
-    private fun showPlaceDetails(place: Place) {
-        val status = if (place.visited) "Gidildi ✔" else "Henüz gidilmedi"
-        val note = if (place.note.isBlank()) "(not yok)" else place.note
-        AlertDialog.Builder(this)
-            .setTitle(place.category)
-            .setMessage("$note\n\n$status\n${String.format("%.5f, %.5f", place.lat, place.lon)}")
-            .setPositiveButton(if (place.visited) "Gidilmedi yap" else "Gidildi yap") { _, _ ->
-                place.visited = !place.visited
-                store.savePlaces()
-                refreshMarkers()
-            }
-            .setNeutralButton("Düzenle") { _, _ ->
-                showPlaceForm(place, place.lat, place.lon, place.visited)
-            }
-            .setNegativeButton("Sil") { _, _ ->
-                AlertDialog.Builder(this)
-                    .setMessage("Bu yer silinsin mi?")
-                    .setPositiveButton("Sil") { _, _ ->
-                        store.places.remove(place)
-                        store.savePlaces()
-                        refreshMarkers()
-                    }
-                    .setNegativeButton("Vazgeç", null)
-                    .show()
-            }
-            .show()
-    }
-
-    // ---------- Kategoriler ----------
-
-    private fun refreshFilterSpinner() {
-        val items = mutableListOf("Tümü")
-        items.addAll(store.categories)
-        spFilter.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, items)
-        val sel = filter?.let { items.indexOf(it) } ?: 0
-        if (sel > 0) {
-            spFilter.setSelection(sel)
-        } else {
-            filter = null
         }
-    }
-
-    private fun showCategories() {
-        val builder = AlertDialog.Builder(this)
-            .setPositiveButton("Yeni kategori") { _, _ -> askNewCategory() }
-            .setNegativeButton("Kapat", null)
-
-        if (store.categories.isEmpty()) {
-            builder.setTitle("Kategoriler").setMessage("Henüz kategori yok. \"Yeni kategori\" ile ekle.")
-        } else {
-            builder.setTitle("Kategoriler (silmek için dokun)")
-                .setItems(store.categories.toTypedArray()) { _, i ->
-                    val name = store.categories[i]
-                    AlertDialog.Builder(this)
-                        .setMessage("\"$name\" kategorisi silinsin mi? Bu kategorideki yerler silinmez.")
-                        .setPositiveButton("Sil") { _, _ ->
-                            store.categories.remove(name)
-                            store.saveCategories()
-                            refreshFilterSpinner()
-                            refreshMarkers()
-                            showCategories()
-                        }
-                        .setNegativeButton("Vazgeç") { _, _ -> showCategories() }
-                        .show()
-                }
-        }
-        builder.show()
-    }
-
-    private fun askNewCategory() {
-        val input = EditText(this)
-        input.hint = "Kategori adı (ör. Elektronik)"
-        input.setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(16))
-        AlertDialog.Builder(this)
-            .setTitle("Yeni kategori")
-            .setView(input)
-            .setPositiveButton("Ekle") { _, _ ->
-                val name = input.text.toString().trim()
-                if (name.isNotEmpty() && store.categories.none { it.equals(name, ignoreCase = true) }) {
-                    store.categories.add(name)
-                    store.saveCategories()
-                    refreshFilterSpinner()
-                }
-                showCategories()
-            }
-            .setNegativeButton("İptal") { _, _ -> showCategories() }
-            .show()
+        refreshMarkers()
     }
 
     // ---------- Yaşam döngüsü ----------
