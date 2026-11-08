@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
 import android.util.TypedValue
 import android.graphics.drawable.BitmapDrawable
@@ -190,13 +191,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Sol tarafta renkli nokta, sağında açıklama yazısı olan tek bir resim üretir.
+     * Ucu sivri bir "pin" ve sağında açıklama yazısı olan tek bir resim üretir.
+     * Pinin sivri ucu işaretçinin çapasıdır, yani tam kaydedilen koordinatın üstüne oturur.
      * rawSub verilirse ana yazının altına küçük harflerle (kategori adı) eklenir.
+     * Döndürülen üçlü: resim, yatay çapa, dikey çapa.
      */
-    private fun labeledMarker(fill: Int, ring: Int, rawText: String, rawSub: String?): Pair<Bitmap, Float> {
+    private fun labeledMarker(
+        fill: Int, ring: Int, visited: Boolean, rawText: String, rawSub: String?
+    ): Triple<Bitmap, Float, Float> {
         val dm = resources.displayMetrics
-        val dotDp = 28
-        val dot = dpToPx(dotDp)
         val gap = dpToPx(4)
         val pad = dpToPx(4)
 
@@ -239,16 +242,74 @@ class MainActivity : AppCompatActivity() {
         if (sub != null) textWidthF = Math.max(textWidthF, subPaint.measureText(sub))
         val textWidth = Math.ceil(textWidthF.toDouble()).toInt()
 
-        val width = dot + gap + textWidth + pad
-        val height = Math.max(dot, Math.ceil((blockH + pad).toDouble()).toInt())
+        // --- Pin ölçüleri ---
+        val m = dpToPx(2).toFloat()          // kenar boşluğu
+        val r = dpToPx(13).toFloat()         // pin başının yarıçapı
+        val pinH = dpToPx(40).toFloat()      // baş üstünden sivri uca yükseklik
+        val pinW = 2 * r + 2 * m
+        val headCy = m + r
+
+        // Yazı bloğu pin başından yüksekse üstte ek boşluk bırak
+        val shift = Math.max(0f, blockH / 2f + pad / 2f - headCy)
+        val tipY = shift + m + pinH
+        val textBottom = shift + headCy + blockH / 2f + pad / 2f
+
+        val width = Math.ceil((pinW + gap + textWidth + pad).toDouble()).toInt()
+        val height = Math.ceil(Math.max(tipY + m, textBottom).toDouble()).toInt()
 
         val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        // Nokta dikeyde ortada; işaretçi çapası da buraya denk gelir
-        canvas.drawBitmap(dotBitmap(fill, ring, dotDp), 0f, (height - dot) / 2f, null)
 
-        val x = (dot + gap).toFloat()
-        val top = (height - blockH) / 2f
+        val cx = m + r
+        val cy = shift + headCy
+
+        // Pin gövdesi: daire + uca inen üçgen (birleşim)
+        val d = tipY - cy
+        val theta = Math.acos((r / d).toDouble())
+        val dx = (r * Math.sin(theta)).toFloat()
+        val dy = (r * Math.cos(theta)).toFloat()
+        val body = Path()
+        body.moveTo(cx, tipY)
+        body.lineTo(cx - dx, cy + dy)
+        body.lineTo(cx + dx, cy + dy)
+        body.close()
+        val head = Path()
+        head.addCircle(cx, cy, r, Path.Direction.CW)
+        body.op(head, Path.Op.UNION)
+
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        fillPaint.style = Paint.Style.FILL
+        fillPaint.color = fill
+        canvas.drawPath(body, fillPaint)
+
+        val outline = Paint(Paint.ANTI_ALIAS_FLAG)
+        outline.style = Paint.Style.STROKE
+        outline.strokeWidth = dpToPx(2).toFloat() + dpToPx(1) / 2f
+        outline.strokeJoin = Paint.Join.ROUND
+        outline.color = ring
+        canvas.drawPath(body, outline)
+
+        // Baş içindeki işaret: gidildiyse beyaz tik, gidilmediyse beyaz nokta
+        val mark = Paint(Paint.ANTI_ALIAS_FLAG)
+        mark.color = Color.WHITE
+        if (visited) {
+            mark.style = Paint.Style.STROKE
+            mark.strokeWidth = dpToPx(2).toFloat()
+            mark.strokeCap = Paint.Cap.ROUND
+            mark.strokeJoin = Paint.Join.ROUND
+            val tick = Path()
+            tick.moveTo(cx - r * 0.42f, cy)
+            tick.lineTo(cx - r * 0.1f, cy + r * 0.32f)
+            tick.lineTo(cx + r * 0.44f, cy - r * 0.32f)
+            canvas.drawPath(tick, mark)
+        } else {
+            mark.style = Paint.Style.FILL
+            canvas.drawCircle(cx, cy, r * 0.36f, mark)
+        }
+
+        // Yazı: pin başının sağında, baş ortasına hizalı
+        val x = pinW + gap
+        val top = cy - blockH / 2f
         val baseline1 = top - fm.ascent
         canvas.drawText(text, x, baseline1, haloPaint)
         canvas.drawText(text, x, baseline1, textPaint)
@@ -258,7 +319,8 @@ class MainActivity : AppCompatActivity() {
             canvas.drawText(sub, x, baseline2, subPaint)
         }
 
-        return Pair(bmp, (dot / 2f) / width)
+        // Çapa = pinin sivri ucu
+        return Triple(bmp, cx / width, tipY / height)
     }
 
     private fun categoryColor(category: String): Int {
@@ -276,7 +338,8 @@ class MainActivity : AppCompatActivity() {
             .forEach { place ->
                 val marker = Marker(map)
                 marker.position = GeoPoint(place.lat, place.lon)
-                // Dolgu rengi = kategori, yeşil halka = gidildi, beyaz halka = henüz gidilmedi
+                // Pin rengi = kategori; yeşil kenar + beyaz tik = gidildi, beyaz kenar = henüz gidilmedi.
+                // Pinin sivri ucu tam işaretlenen konumdadır.
                 val ring = if (place.visited) Color.parseColor("#2E7D32") else Color.WHITE
                 // Noktanın yanında açıklama yazısı görünür (not yoksa kategori adı).
                 // İşaretçi ikonları ekranda sabit boyutta kalır, harita yakınlaşsa da yazı büyümez/küçülmez.
@@ -284,9 +347,10 @@ class MainActivity : AppCompatActivity() {
                 val hasNote = place.note.isNotBlank()
                 val mainText = if (hasNote) place.note else place.category
                 val subText = if (hasNote && filter == null) place.category else null
-                val (bmp, anchorU) = labeledMarker(categoryColor(place.category), ring, mainText, subText)
+                val (bmp, anchorU, anchorV) =
+                    labeledMarker(categoryColor(place.category), ring, place.visited, mainText, subText)
                 marker.icon = BitmapDrawable(resources, bmp)
-                marker.setAnchor(anchorU, Marker.ANCHOR_CENTER)
+                marker.setAnchor(anchorU, anchorV)
                 marker.title = place.category
                 marker.snippet = place.note
                 marker.setOnMarkerClickListener { _, _ ->
