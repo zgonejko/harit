@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Typeface
+import android.util.TypedValue
 import android.graphics.drawable.BitmapDrawable
 import android.os.Bundle
 import android.view.View
@@ -68,6 +70,10 @@ class MainActivity : AppCompatActivity() {
             getSharedPreferences("osmdroid", MODE_PRIVATE)
         )
         Configuration.getInstance().userAgentValue = packageName
+        // Gezdiğin harita parçaları telefonda uzun süre saklansın (internetsiz kullanım için)
+        Configuration.getInstance().tileFileSystemCacheMaxBytes = 1500L * 1024 * 1024
+        Configuration.getInstance().tileFileSystemCacheTrimBytes = 1300L * 1024 * 1024
+        Configuration.getInstance().expirationOverrideDuration = 90L * 24 * 60 * 60 * 1000
 
         setContentView(R.layout.activity_main)
         store = Store(this)
@@ -183,6 +189,78 @@ class MainActivity : AppCompatActivity() {
         return bmp
     }
 
+    /**
+     * Sol tarafta renkli nokta, sağında açıklama yazısı olan tek bir resim üretir.
+     * rawSub verilirse ana yazının altına küçük harflerle (kategori adı) eklenir.
+     */
+    private fun labeledMarker(fill: Int, ring: Int, rawText: String, rawSub: String?): Pair<Bitmap, Float> {
+        val dm = resources.displayMetrics
+        val dotDp = 28
+        val dot = dpToPx(dotDp)
+        val gap = dpToPx(4)
+        val pad = dpToPx(4)
+
+        fun clip(s: String): String {
+            val t = s.replace("\n", " ").trim()
+            return if (t.length > 40) t.take(40) + "…" else t
+        }
+
+        val text = clip(rawText)
+        val sub = rawSub?.let { clip(it) }
+
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        textPaint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 12f, dm)
+        textPaint.typeface = Typeface.DEFAULT_BOLD
+        textPaint.color = Color.parseColor("#212121")
+
+        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+        subPaint.textSize = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, 10f, dm)
+        subPaint.typeface = Typeface.DEFAULT
+        subPaint.color = Color.parseColor("#555555")
+
+        // Okunaklı olsun diye yazıların etrafına beyaz kontur
+        val haloPaint = Paint(textPaint)
+        haloPaint.style = Paint.Style.STROKE
+        haloPaint.strokeWidth = dpToPx(3).toFloat()
+        haloPaint.color = Color.WHITE
+
+        val subHaloPaint = Paint(subPaint)
+        subHaloPaint.style = Paint.Style.STROKE
+        subHaloPaint.strokeWidth = dpToPx(3).toFloat()
+        subHaloPaint.color = Color.WHITE
+
+        val fm = textPaint.fontMetrics
+        val sfm = subPaint.fontMetrics
+        val textH = fm.descent - fm.ascent
+        val subH = sfm.descent - sfm.ascent
+        val blockH = if (sub != null) textH + subH else textH
+
+        var textWidthF = textPaint.measureText(text)
+        if (sub != null) textWidthF = Math.max(textWidthF, subPaint.measureText(sub))
+        val textWidth = Math.ceil(textWidthF.toDouble()).toInt()
+
+        val width = dot + gap + textWidth + pad
+        val height = Math.max(dot, Math.ceil((blockH + pad).toDouble()).toInt())
+
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        // Nokta dikeyde ortada; işaretçi çapası da buraya denk gelir
+        canvas.drawBitmap(dotBitmap(fill, ring, dotDp), 0f, (height - dot) / 2f, null)
+
+        val x = (dot + gap).toFloat()
+        val top = (height - blockH) / 2f
+        val baseline1 = top - fm.ascent
+        canvas.drawText(text, x, baseline1, haloPaint)
+        canvas.drawText(text, x, baseline1, textPaint)
+        if (sub != null) {
+            val baseline2 = top + textH - sfm.ascent
+            canvas.drawText(sub, x, baseline2, subHaloPaint)
+            canvas.drawText(sub, x, baseline2, subPaint)
+        }
+
+        return Pair(bmp, (dot / 2f) / width)
+    }
+
     private fun categoryColor(category: String): Int {
         val idx = store.categories.indexOf(category)
         val i = if (idx >= 0) idx else Math.abs(category.hashCode())
@@ -198,10 +276,17 @@ class MainActivity : AppCompatActivity() {
             .forEach { place ->
                 val marker = Marker(map)
                 marker.position = GeoPoint(place.lat, place.lon)
-                marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                 // Dolgu rengi = kategori, yeşil halka = gidildi, beyaz halka = henüz gidilmedi
                 val ring = if (place.visited) Color.parseColor("#2E7D32") else Color.WHITE
-                marker.icon = BitmapDrawable(resources, dotBitmap(categoryColor(place.category), ring, 28))
+                // Noktanın yanında açıklama yazısı görünür (not yoksa kategori adı).
+                // İşaretçi ikonları ekranda sabit boyutta kalır, harita yakınlaşsa da yazı büyümez/küçülmez.
+                // "Tümü" seçiliyken notun altında kategori adı da görünür; tek kategori seçiliyken sadece not.
+                val hasNote = place.note.isNotBlank()
+                val mainText = if (hasNote) place.note else place.category
+                val subText = if (hasNote && filter == null) place.category else null
+                val (bmp, anchorU) = labeledMarker(categoryColor(place.category), ring, mainText, subText)
+                marker.icon = BitmapDrawable(resources, bmp)
+                marker.setAnchor(anchorU, Marker.ANCHOR_CENTER)
                 marker.title = place.category
                 marker.snippet = place.note
                 marker.setOnMarkerClickListener { _, _ ->
